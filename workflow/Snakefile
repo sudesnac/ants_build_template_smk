@@ -1,0 +1,128 @@
+from os.path import join
+import pandas as pd
+
+
+configfile: 'config/config.yml'
+
+#load participants.tsv file, and strip off sub- from participant_id column
+df = pd.read_table(config['participants_tsv'])
+subjects = df.participant_id.to_list() 
+subjects = [ s.strip('sub-') for s in subjects ]
+
+envmodules: 'ants'
+
+#need this to make sure iterations don't go below 0!
+wildcard_constraints:
+    iteration="[0-9]+"
+
+rule all:
+    input: 'results/iter_{iteration}/template.nii.gz'.format(iteration=config['max_iters'])
+
+rule gen_init_template:
+    input: expand(join(config['bids_dir'],config['target_nii']),subject=subjects)
+    output: 'results/iter_0/template.nii.gz'
+    shell:
+        'AverageImages 3 {output} 1 {input}'
+
+rule reg_to_template:
+    input: 
+        template = 'results/iter_{iteration}/template.nii.gz',
+        target = join(config['bids_dir'],config['target_nii'])
+    params:
+        out_prefix = 'results/iter_{iteration}/sub-{subject}_iter-{iteration}_'
+    output:
+        warp = 'results/iter_{iteration}/sub-{subject}_iter-{iteration}_1Warp.nii.gz',
+        invwarp = 'results/iter_{iteration}/sub-{subject}_iter-{iteration}_1InverseWarp.nii.gz',
+        affine = 'results/iter_{iteration}/sub-{subject}_iter-{iteration}_0GenericAffine.mat',
+        warped = 'results/iter_{iteration}/sub-{subject}_iter-{iteration}_WarpedToTemplate.nii.gz'
+    shell:
+        'antsRegistration {config[ants][base_opts]} {config[ants][intensity_opts]} '
+        '-r [{input.template},{input.target},1] ' #initialize with image headers
+        '-t Rigid[0.1] -m MI[{input.template},{input.target},1,32,Regular,0.25] -c [1000x500x250x0,1e-6,10] -f 6x4x2x1 -s 4x2x1x0 ' # rigid registration
+        '-t Affine[0.1] -m MI[{input.template},{input.target},1,32,Regular,0.25] -c [1000x500x250x0,1e-6,10] -f 6x4x2x1 -s 4x2x1x0 ' # affine registration
+        '-t {config[ants][transform_model]} -m {config[ants][sim_metric]}[{input.template},{input.target},1,4] '  # deformable registration
+        '-c [{config[ants][reg_iterations]},1e-9,10] -f {config[ants][shrink_factors]} -s {config[ants][smoothing_factors]} ' # .. continued
+        '-o {params.out_prefix} && '
+        'antsApplyTransforms {config[ants][base_opts]} -i {input.target} -o {output.warped} -r {input.template} -t {output.warp} -t {output.affine}'
+
+#antsRegistration -d 3 --float 1 --verbose 1 -u 1 -w [0.01,0.99] -z 1 -r [mytemplatetemplate0.nii.gz,../sub-C001_acq-MP2RAGE_run-01_T1w.nii.gz,1] -t Rigid[0.1] -m MI[mytemplatetemplate0.nii.gz,../sub-C001_acq-MP2RAGE_run-01_T1w.nii.gz,1,32,Regular,0.25] -c [1000x500x250x0,1e-6,10] -f 6x4x2x1 -s 4x2x1x0 -t Affine[0.1] -m MI[mytemplatetemplate0.nii.gz,../sub-C001_acq-MP2RAGE_run-01_T1w.nii.gz,1,32,Regular,0.25] -c [1000x500x250x0,1e-6,10] -f 6x4x2x1 -s 4x2x1x0 -t SyN[0.1,3,0] -m CC[mytemplatetemplate0.nii.gz,../sub-C001_acq-MP2RAGE_run-01_T1w.nii.gz,1,4] -c [2,1e-9,10] -f 1 -s 0vox -o ./mytemplatesub-C001_acq-MP2RAGE_run-01_T1w0
+
+#antsApplyTransforms -d 3 --float 1 --verbose 1 -i ../sub-C001_acq-MP2RAGE_run-01_T1w.nii.gz -o ./mytemplatetemplate0sub-C001_acq-MP2RAGE_run-01_T1w0WarpedToTemplate.nii.gz -r mytemplatetemplate0.nii.gz -t ./mytemplatesub-C001_acq-MP2RAGE_run-01_T1w01Warp.nii.gz -t ./mytemplatesub-C001_acq-MP2RAGE_run-01_T1w00GenericAffine.mat
+
+def get_prev_targets (wildcards):
+    curr_iter = int(wildcards.iteration)
+    if (curr_iter <= 1):
+        return ''
+    else:
+       return expand('results/iter_{iteration}/sub-{subject}_warpTo_template_{iteration}.nii.gz',subject=subjects,iteration=curr_iter-1) 
+
+def get_prev_template (wildcards):
+    curr_iter = int(wildcards.iteration)
+    if (curr_iter <= 1):
+        return ''
+    else:
+       return 'results/iter_{iteration}/template.nii.gz'.format(iteration = curr_iter-1)
+
+
+
+
+#rule update_template:
+#    input: 
+#        targets = lambda wildcards: expand('results/iter_{iteration}/sub-{subject}_iter-{iteration}_WarpedToTemplate.nii.gz',subject=subjects,iteration=int(wildcards.iteration)-1),
+#        template = lambda wildcards: 'results/iter_{iteration}/template.nii.gz'.format(iteration=int(wildcards.iteration)-1)
+#    output:
+#        template = 'results/iter_{iteration}/template.nii.gz'
+#    shell:
+ 
+## -- shape update rules:
+rule avg_warped:
+    input: 
+        targets = lambda wildcards: expand('results/iter_{iteration}/sub-{subject}_iter-{iteration}_WarpedToTemplate.nii.gz',subject=subjects,iteration=int(wildcards.iteration)-1),
+    output: 'results/iter_{iteration}/shapeupdate/avg_warped.nii.gz'
+    shell:
+        'AverageImages 3 {output} 1 {input}'
+       
+rule avg_inverse_warps:
+    input:
+        warps = lambda wildcards: expand('results/iter_{iteration}/sub-{subject}_iter-{iteration}_1InverseWarp.nii.gz',subject=subjects,iteration=int(wildcards.iteration)-1),
+    output: 
+        invwarp = 'results/iter_{iteration}/shapeupdate/avg_inverse_warps.nii.gz'
+    shell:
+        'AverageImages 3 {output} 0 {input}'
+         
+rule scale_by_gradient_step:
+    input: 'results/iter_{iteration}/shapeupdate/avg_inverse_warps.nii.gz'
+    output: 'results/iter_{iteration}/shapeupdate/avg_inverse_warps_scaled.nii.gz'
+    shell:
+        'MultiplyImages 3 {input} -0.25 {output}' 
+
+rule avg_affine_transforms:
+    input: 
+        affine = lambda wildcards: expand('results/iter_{iteration}/sub-{subject}_iter-{iteration}_0GenericAffine.mat',subject=subjects,iteration=int(wildcards.iteration)-1),
+    output:
+        affine = 'results/iter_{iteration}/shapeupdate/avg_affine.mat'
+    shell:
+        'AverageAffineTransformNoRigid 3 {output} {input}'
+
+rule transform_inverse_warp:
+    input:
+        affine = 'results/iter_{iteration}/shapeupdate/avg_affine.mat',
+        invwarp = 'results/iter_{iteration}/shapeupdate/avg_inverse_warps_scaled.nii.gz',
+        ref = 'results/iter_{iteration}/shapeupdate/avg_warped.nii.gz'
+    output: 
+        invwarp = 'results/iter_{iteration}/shapeupdate/avg_inverse_warps_scaled_transformed.nii.gz'
+    shell:
+        'antsApplyTransforms -d 3 -e vector -i {input.invwarp} -o {output} -t [{input.affine},1] -r {input.ref} --verbose 1'
+
+rule apply_template_update:
+    input:
+        template =  'results/iter_{iteration}/shapeupdate/avg_warped.nii.gz',
+        affine = 'results/iter_{iteration}/shapeupdate/avg_affine.mat',
+        invwarp = 'results/iter_{iteration}/shapeupdate/avg_inverse_warps_scaled_transformed.nii.gz'
+    output:
+        template =  'results/iter_{iteration}/template.nii.gz'
+    shell:
+        'antsApplyTransforms -d 3 --float 1 --verbose 1 -i {input.template} -o {output.template} -t [{input.affine},1] '
+        ' -t {input.invwarp} -t {input.invwarp} -t {input.invwarp} -t {input.invwarp} -r {input.template}' #apply warp 4 times
+
+
