@@ -1,7 +1,6 @@
 from os.path import join
 import pandas as pd
 
-
 configfile: 'config/config.yml'
 
 #load participants.tsv file, and strip off sub- from participant_id column
@@ -15,18 +14,30 @@ wildcard_constraints:
     iteration="[0-9]+"
 
 
+
 localrules: all, gen_init_template
 
 rule all:
     input: 'results/iter_{iteration}/template.nii.gz'.format(iteration=config['max_iters'])
 
-rule gen_init_template:
+
+rule gen_init_avg_template:
     input: expand(join(config['bids_dir'],config['target_nii']),subject=subjects)
-    output: 'results/iter_0/template.nii.gz'
-    log: 'logs/gen_init_template.txt'
+    output: 'results/iter_0/init/init_avg_template.nii.gz'
+    log: 'logs/gen_init_avg_template.txt'
     envmodules: 'ants'
     shell:
         'AverageImages 3 {output} 1 {input}'
+
+rule get_existing_template:
+    input: config['init_template']
+    output: 'results/iter_0/init/existing_template.nii.gz'
+    shell: 'cp {input} {output}'
+
+rule set_init_template:
+    input: lambda wildcards: 'results/iter_0/init/init_avg_template.nii.gz' if config['init_template'] == None else config['init_template']
+    output: 'results/iter_0/template.nii.gz'
+    shell: 'cp {input} {output}'
 
 rule reg_to_template:
     input: 

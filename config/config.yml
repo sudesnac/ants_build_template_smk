@@ -1,13 +1,11 @@
-bids_dir: /project/6007967/akhanf/cfmm-bids/data/Khan/SNSX_7T/bids
-
+bids_dir: /project/6007967/akhanf/cfmm-bids/data/Khan/SNSX_7T_fresh/correct7T.v0.3/gradcorrect_v0.0.3
 target_nii: 'sub-{subject}/anat/sub-{subject}_acq-MP2RAGE_run-01_T1w.nii.gz' 
 
 participants_tsv: 'config/participants.tsv'
-suffix: 'acq-MP2RAGE_run-01_T1w'
 
+init_template: 'resources/tpl-MNI152NLin2009cAsym_res-01_T1w.nii.gz'
 
 max_iters: 4
-
 
 ants:
     base_opts: '-d 3 --float 1 --verbose 1'
