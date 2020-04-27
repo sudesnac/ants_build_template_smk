@@ -74,6 +74,7 @@ rule reg_to_template:
         invwarp = 'results/iter_{iteration}/sub-{subject}_1InverseWarp.nii.gz',
         affine = 'results/iter_{iteration}/sub-{subject}_0GenericAffine.mat',
     log: 'logs/reg_to_template/iter_{iteration}_sub-{subject}.log'
+    group: 'reg'
     threads: 16
     resources:
         mem_mb = 16000, #should try to calculate this based on image size.. 
@@ -100,6 +101,7 @@ rule warp_to_template:
         warped = 'results/iter_{iteration}/sub-{subject}_WarpedToTemplate_{channel}.nii.gz'
     log: 'logs/warp_to_template/iter_{iteration}_sub-{subject}_{channel}.log'
     threads: 1
+    group: 'reg'
     shell: 
         'ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS={threads} '
         'antsApplyTransforms {params.base_opts} -i {input.target} -o {output.warped} -r {input.template} -t {input.warp} -t {input.affine} &> {log}'
